@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: finanzas-claras-backend
+    env_file:
+      - .env
+    restart: unless-stopped
+    expose:
+      - "8000"
+    volumes:
+      - sqlite_data:/app/data
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: /api
+    container_name: finanzas-claras-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  sqlite_data:

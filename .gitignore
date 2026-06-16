@@ -1,0 +1,12 @@
+.env
+.env.production
+node_modules
+dist
+__pycache__
+.pytest_cache
+*.pyc
+data/
+.terraform/
+*.tfstate
+*.tfstate.*
+infra/terraform/jenkins.auto.tfvars.json

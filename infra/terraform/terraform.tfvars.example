@@ -1,0 +1,7 @@
+aws_region        = "us-east-1"
+project_name      = "finanzas-claras"
+environment       = "demo"
+instance_type     = "t3.small"
+instance_user     = "ubuntu"
+app_directory     = "/opt/finanzas-claras"
+ssh_ingress_cidrs = ["0.0.0.0/0"]

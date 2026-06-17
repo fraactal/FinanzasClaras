@@ -12,3 +12,8 @@ output "ssh_command" {
   description = "SSH command to access the VM."
   value       = "ssh ${var.instance_user}@${aws_eip.app.public_ip}"
 }
+
+output "app_directory" {
+  description = "Deployment directory on the target VM."
+  value       = var.app_directory
+}

@@ -4,21 +4,15 @@ pipeline {
   options {
     disableConcurrentBuilds()
     timestamps()
-  }
-
-  parameters {
-    string(name: 'AWS_REGION', defaultValue: 'us-east-1', description: 'AWS region for the demo environment')
-    string(name: 'INSTANCE_TYPE', defaultValue: 't3.small', description: 'EC2 instance type')
-    string(name: 'SSH_INGRESS_CIDR', defaultValue: '0.0.0.0/0', description: 'CIDR block allowed to reach SSH on the demo VM')
-    booleanParam(name: 'APPLY_INFRA', defaultValue: true, description: 'Run Terraform apply before deploying the app')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
   }
 
   environment {
     TF_IN_AUTOMATION = 'true'
     TF_INPUT = '0'
     TF_DIR = 'infra/terraform'
-    DEPLOY_DIR = '/opt/finanzas-claras'
-    REMOTE_USER = 'ubuntu'
+    APP_NAME = 'finanzasclaras'
+    DEPLOY_ENV = "${env.BRANCH_NAME == 'main' ? 'production' : env.BRANCH_NAME == 'staging' ? 'staging' : 'demo'}"
   }
 
   stages {
@@ -28,78 +22,186 @@ pipeline {
       }
     }
 
-    stage('Validate') {
+    stage('Validate App') {
       steps {
-        powershell '''
-        python -m compileall backend/app
+        sh '''
+          set -eu
+          test -f AGENTS.md
+          test -f Jenkinsfile
+          test -f docker-compose.prod.yml
+          test -f backend/app/scripts/seed_admin.py
+          test -f infra/terraform/backend/demo.hcl.example
+          test -f infra/terraform/backend/staging.hcl.example
+          test -f infra/terraform/backend/production.hcl.example
+          test -f infra/terraform/environments/demo.tfvars.example
+          test -f infra/terraform/environments/staging.tfvars.example
+          test -f infra/terraform/environments/production.tfvars.example
         '''
+      }
+    }
+
+    stage('Terraform Format') {
+      steps {
+        dir(env.TF_DIR) {
+          sh 'terraform fmt -check -recursive'
+        }
+      }
+    }
+
+    stage('Terraform Init') {
+      steps {
+        script {
+          withCredentials([
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-aws-access-key-id", variable: 'AWS_ACCESS_KEY_ID'),
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-aws-secret-access-key", variable: 'AWS_SECRET_ACCESS_KEY'),
+            file(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-tf-backend", variable: 'TF_BACKEND_FILE')
+          ]) {
+            dir(env.TF_DIR) {
+              sh 'terraform init -backend-config="$TF_BACKEND_FILE"'
+            }
+          }
+        }
+      }
+    }
+
+    stage('Terraform Validate') {
+      steps {
+        script {
+          withCredentials([
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-aws-access-key-id", variable: 'AWS_ACCESS_KEY_ID'),
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-aws-secret-access-key", variable: 'AWS_SECRET_ACCESS_KEY'),
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-vm-public-key", variable: 'VM_PUBLIC_KEY')
+          ]) {
+            dir(env.TF_DIR) {
+              sh '''
+                cat > jenkins.auto.tfvars.json <<EOF
+                {
+                  "public_key": "${VM_PUBLIC_KEY}"
+                }
+                EOF
+                terraform validate
+              '''
+            }
+          }
+        }
+      }
+    }
+
+    stage('Terraform Plan') {
+      steps {
+        script {
+          withCredentials([
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-aws-access-key-id", variable: 'AWS_ACCESS_KEY_ID'),
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-aws-secret-access-key", variable: 'AWS_SECRET_ACCESS_KEY'),
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-vm-public-key", variable: 'VM_PUBLIC_KEY')
+          ]) {
+            dir(env.TF_DIR) {
+              sh '''
+                cat > jenkins.auto.tfvars.json <<EOF
+                {
+                  "public_key": "${VM_PUBLIC_KEY}"
+                }
+                EOF
+                terraform plan -var-file="environments/${DEPLOY_ENV}.tfvars.example"
+              '''
+            }
+          }
+        }
+      }
+    }
+
+    stage('Production Approval') {
+      when {
+        branch 'main'
+      }
+      steps {
+        input message: 'Approve production apply and deploy for FinanzasClaras?', ok: 'Deploy production'
       }
     }
 
     stage('Terraform Apply') {
       when {
-        expression { return params.APPLY_INFRA }
+        anyOf {
+          branch 'main'
+          branch 'staging'
+          branch 'develop'
+        }
       }
       steps {
-        withCredentials([
-          string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
-          string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY'),
-          string(credentialsId: 'demo-vm-public-key', variable: 'DEMO_VM_PUBLIC_KEY')
-        ]) {
-          powershell '''
-          $ErrorActionPreference = "Stop"
-          $tfVars = @{
-            aws_region        = "${params.AWS_REGION}"
-            instance_type     = "${params.INSTANCE_TYPE}"
-            ssh_ingress_cidrs = @("${params.SSH_INGRESS_CIDR}")
-            public_key        = $env:DEMO_VM_PUBLIC_KEY
-          } | ConvertTo-Json -Depth 3
-          Set-Content -Path "$env:TF_DIR/jenkins.auto.tfvars.json" -Value $tfVars
-          terraform -chdir=$env:TF_DIR init
-          terraform -chdir=$env:TF_DIR apply -auto-approve
-          '''
+        script {
+          withCredentials([
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-aws-access-key-id", variable: 'AWS_ACCESS_KEY_ID'),
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-aws-secret-access-key", variable: 'AWS_SECRET_ACCESS_KEY'),
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-vm-public-key", variable: 'VM_PUBLIC_KEY')
+          ]) {
+            dir(env.TF_DIR) {
+              sh '''
+                cat > jenkins.auto.tfvars.json <<EOF
+                {
+                  "public_key": "${VM_PUBLIC_KEY}"
+                }
+                EOF
+                terraform apply -auto-approve -var-file="environments/${DEPLOY_ENV}.tfvars.example"
+              '''
+            }
+          }
         }
       }
     }
 
-    stage('Deploy Demo') {
+    stage('Deploy') {
+      when {
+        anyOf {
+          branch 'main'
+          branch 'staging'
+          branch 'develop'
+        }
+      }
       steps {
-        withCredentials([
-          string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
-          string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY'),
-          sshUserPrivateKey(credentialsId: 'demo-vm-ssh-key', keyFileVariable: 'SSH_KEY_FILE', usernameVariable: 'SSH_USERNAME'),
-          file(credentialsId: 'finanzas-claras-demo-env', variable: 'PROD_ENV_FILE'),
-          string(credentialsId: 'admin-demo-name', variable: 'ADMIN_DEMO_NAME'),
-          string(credentialsId: 'admin-demo-email', variable: 'ADMIN_DEMO_EMAIL'),
-          string(credentialsId: 'admin-demo-password', variable: 'ADMIN_DEMO_PASSWORD')
-        ]) {
-          powershell '''
-          $ErrorActionPreference = "Stop"
-          $publicIp = terraform -chdir=$env:TF_DIR output -raw public_ip
-          $remoteUser = if ($env:SSH_USERNAME) { $env:SSH_USERNAME } else { $env:REMOTE_USER }
-          $remote = "$remoteUser@$publicIp"
+        script {
+          withCredentials([
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-aws-access-key-id", variable: 'AWS_ACCESS_KEY_ID'),
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-aws-secret-access-key", variable: 'AWS_SECRET_ACCESS_KEY'),
+            sshUserPrivateKey(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-vm-ssh", keyFileVariable: 'SSH_KEY_FILE', usernameVariable: 'SSH_USERNAME'),
+            file(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-env-file", variable: 'PROD_ENV_FILE'),
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-admin-name", variable: 'ADMIN_NAME'),
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-admin-email", variable: 'ADMIN_EMAIL'),
+            string(credentialsId: "finanzasclaras-${env.DEPLOY_ENV}-admin-password", variable: 'ADMIN_PASSWORD')
+          ]) {
+            dir(env.TF_DIR) {
+              sh '''
+                public_ip="$(terraform output -raw public_ip)"
+                app_directory="$(terraform output -raw app_directory)"
+                remote="${SSH_USERNAME}@${public_ip}"
 
-          ssh -o StrictHostKeyChecking=no -i $env:SSH_KEY_FILE $remote "mkdir -p $env:DEPLOY_DIR && rm -rf $env:DEPLOY_DIR/backend $env:DEPLOY_DIR/frontend"
+                ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_FILE" "$remote" \
+                  "mkdir -p '$app_directory' && rm -rf '$app_directory/backend' '$app_directory/frontend'"
 
-          scp -o StrictHostKeyChecking=no -i $env:SSH_KEY_FILE docker-compose.prod.yml ${remote}:$env:DEPLOY_DIR/docker-compose.prod.yml
-          scp -o StrictHostKeyChecking=no -i $env:SSH_KEY_FILE $env:PROD_ENV_FILE ${remote}:$env:DEPLOY_DIR/.env
-          scp -o StrictHostKeyChecking=no -i $env:SSH_KEY_FILE -r backend ${remote}:$env:DEPLOY_DIR/
-          scp -o StrictHostKeyChecking=no -i $env:SSH_KEY_FILE -r frontend ${remote}:$env:DEPLOY_DIR/
+                scp -o StrictHostKeyChecking=no -i "$SSH_KEY_FILE" "$WORKSPACE/docker-compose.prod.yml" "$remote:$app_directory/docker-compose.prod.yml"
+                scp -o StrictHostKeyChecking=no -i "$SSH_KEY_FILE" "$PROD_ENV_FILE" "$remote:$app_directory/.env"
+                scp -o StrictHostKeyChecking=no -i "$SSH_KEY_FILE" -r "$WORKSPACE/backend" "$remote:$app_directory/"
+                scp -o StrictHostKeyChecking=no -i "$SSH_KEY_FILE" -r "$WORKSPACE/frontend" "$remote:$app_directory/"
 
-          ssh -o StrictHostKeyChecking=no -i $env:SSH_KEY_FILE $remote "cd $env:DEPLOY_DIR && docker compose -f docker-compose.prod.yml up -d --build --remove-orphans"
-          ssh -o StrictHostKeyChecking=no -i $env:SSH_KEY_FILE $remote "cd $env:DEPLOY_DIR && docker compose -f docker-compose.prod.yml exec -T backend python -m app.scripts.seed_admin --name '$env:ADMIN_DEMO_NAME' --email '$env:ADMIN_DEMO_EMAIL' --password '$env:ADMIN_DEMO_PASSWORD'"
-          '''
+                ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_FILE" "$remote" \
+                  "cd '$app_directory' && docker compose -f docker-compose.prod.yml up -d --build --remove-orphans"
+
+                ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_FILE" "$remote" \
+                  "cd '$app_directory' && docker compose -f docker-compose.prod.yml exec -T \
+                  -e SEED_ADMIN_NAME='$ADMIN_NAME' \
+                  -e SEED_ADMIN_EMAIL='$ADMIN_EMAIL' \
+                  -e SEED_ADMIN_PASSWORD='$ADMIN_PASSWORD' \
+                  backend sh -lc 'python -m app.scripts.seed_admin --name \"$SEED_ADMIN_NAME\" --email \"$SEED_ADMIN_EMAIL\" --password \"$SEED_ADMIN_PASSWORD\"'"
+              '''
+            }
+          }
         }
       }
     }
   }
 
   post {
-    success {
-      powershell '''
-      $publicIp = terraform -chdir=$env:TF_DIR output -raw public_ip
-      Write-Host "Demo deployed at http://$publicIp"
-      '''
+    always {
+      echo "Pipeline finished for ${env.JOB_NAME} on ${env.DEPLOY_ENV}"
     }
   }
 }

@@ -45,3 +45,15 @@ variable "ssh_ingress_cidrs" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "http_ingress_cidrs" {
+  description = "CIDR blocks allowed to connect to HTTP."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "root_volume_size" {
+  description = "Root volume size in GiB."
+  type        = number
+  default     = 20
+}

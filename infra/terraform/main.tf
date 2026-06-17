@@ -51,7 +51,7 @@ resource "aws_security_group" "app" {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.http_ingress_cidrs
   }
 
   egress {
@@ -76,7 +76,7 @@ resource "aws_instance" "app" {
   })
 
   root_block_device {
-    volume_size = 20
+    volume_size = var.root_volume_size
     volume_type = "gp3"
   }
 

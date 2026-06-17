@@ -1,0 +1,5 @@
+bucket         = "replace-me-terraform-state"
+key            = "finanzasclaras/production/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "replace-me-terraform-locks"
+encrypt        = true

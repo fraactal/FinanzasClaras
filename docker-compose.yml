@@ -15,8 +15,7 @@ services:
       context: ./frontend
     container_name: finanzas-claras-frontend
     environment:
-      #VITE_API_URL: http://localhost:8000/api
-      VITE_API_URL: http://192.168.100.9:8000/api
+      VITE_API_URL: http://localhost:8000/api
     ports:
       - "5173:5173"
     depends_on:

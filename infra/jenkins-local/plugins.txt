@@ -1,9 +1,0 @@
-workflow-aggregator
-git
-github
-credentials
-credentials-binding
-ssh-agent
-plain-credentials
-matrix-auth
-pipeline-stage-view

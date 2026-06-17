@@ -52,3 +52,15 @@ Usa backend remoto por ambiente, con keys separadas:
 - `finanzasclaras/demo/terraform.tfstate`
 - `finanzasclaras/staging/terraform.tfstate`
 - `finanzasclaras/production/terraform.tfstate`
+
+## Tamaño inicial recomendado
+
+Para esta etapa:
+
+- `demo` -> `t3a.small`
+- `staging` -> `t3a.small`
+- `production` -> `t3.small`
+
+La idea es mantener bajo costo en los ambientes no productivos sin pasar todavía
+a estrategias más complejas como autoscaling. Cuando la aplicación corra en un
+servidor real, conviene medir consumo antes de subir capacidades.

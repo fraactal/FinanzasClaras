@@ -5,12 +5,34 @@ export function Money({ value }: { value?: number | null }) {
   return <>{formatter.format(value ?? 0)}</>;
 }
 
-export function BudgetBanner({ total, budget }: { total: number; budget: BudgetStatus }) {
+type BudgetBannerPeriod = "day" | "week" | "month";
+
+const budgetBannerCopy: Record<BudgetBannerPeriod, { eyebrow: string; remainingSuffix: string; missingBudget: string }> = {
+  day: {
+    eyebrow: "Tu gasto de hoy",
+    remainingSuffix: "para hoy",
+    missingBudget: "Todavía no defines un tope diario.",
+  },
+  week: {
+    eyebrow: "Tu gasto de la semana",
+    remainingSuffix: "para esta semana",
+    missingBudget: "Todavía no defines un tope semanal.",
+  },
+  month: {
+    eyebrow: "Tu gasto del mes",
+    remainingSuffix: "para este mes",
+    missingBudget: "Todavía no defines un tope mensual.",
+  },
+};
+
+export function BudgetBanner({ total, budget, period }: { total: number; budget: BudgetStatus; period: BudgetBannerPeriod }) {
   const used = Math.min(budget.porcentaje_usado ?? 0, 100);
+  const copy = budgetBannerCopy[period];
+
   return (
     <section className={`budget-banner ${budget.estado}`}>
       <div>
-        <p className="eyebrow">Tu gasto de hoy</p>
+        <p className="eyebrow">{copy.eyebrow}</p>
         <h2>
           <Money value={total} />
         </h2>
@@ -18,8 +40,8 @@ export function BudgetBanner({ total, budget }: { total: number; budget: BudgetS
           {budget.presupuesto
             ? `Te quedan ${new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(
                 budget.restante ?? 0,
-              )} para hoy`
-            : "Todavía no defines un tope diario."}
+              )} ${copy.remainingSuffix}`
+            : copy.missingBudget}
         </p>
       </div>
       <div className="progress-panel">
@@ -44,7 +66,7 @@ export function CategorySummary({ data }: { data: CategoryTotal[] }) {
       {data.map((item) => (
         <article className="category-card" key={item.category_id}>
           <span className="emoji-pill">{item.emoji}</span>
-          <div>
+          <div className="category-summary-copy">
             <h3>{item.nombre}</h3>
             <strong>
               <Money value={item.total} />

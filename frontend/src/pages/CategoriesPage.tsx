@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
+import { useUI } from "../hooks/useUI";
 import { createCategory, deleteCategoryApi, fetchCategories, updateCategory } from "../services/dashboard";
 import type { Category } from "../types";
 
@@ -18,9 +19,11 @@ type CategoryForm = {
 const initialForm: CategoryForm = { nombre: "", emoji: "💸", color: "#5a8f5a" };
 
 export function CategoriesPage() {
+  const { confirm, notify } = useUI();
   const [categories, setCategories] = useState<Category[]>([]);
   const [form, setForm] = useState<CategoryForm>(initialForm);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [error, setError] = useState("");
 
   const sortedCategories = useMemo(
     () => [...categories].sort((a, b) => a.order_position - b.order_position || a.id - b.id),
@@ -37,26 +40,61 @@ export function CategoriesPage() {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    await createCategory(form);
-    setForm(initialForm);
-    await load();
+    setError("");
+    try {
+      await createCategory(form);
+      setForm(initialForm);
+      await load();
+      notify({ title: "Categoría creada", message: "La categoría ya está disponible para tus registros.", tone: "success" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo crear la categoría.");
+      notify({ title: "No se pudo crear la categoría", tone: "error" });
+    }
   }
 
-  async function moveCategory(category: Category, direction: "up" | "down") {
-    const index = sortedCategories.findIndex((item) => item.id === category.id);
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (index < 0 || targetIndex < 0 || targetIndex >= sortedCategories.length) {
+  async function handleToggleCategory(category: Category) {
+    try {
+      setError("");
+      await updateCategory(category.id, { activa: !category.activa });
+      await load();
+      notify({
+        title: category.activa ? "Categoría oculta" : "Categoría activada",
+        message: `${category.nombre} se actualizó correctamente.`,
+        tone: "success",
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo actualizar la categoría.");
+      notify({ title: "No se pudo actualizar la categoría", tone: "error" });
+    }
+  }
+
+  async function handleDeleteCategory(category: Category) {
+    const confirmed = await confirm({
+      title: "Eliminar categoría",
+      message: `¿Eliminar la categoría "${category.nombre}"?`,
+      details: 'Si tiene gastos o presupuestos asociados, se reasignarán automáticamente a "Otros".',
+      confirmLabel: "Eliminar",
+      cancelLabel: "Cancelar",
+      tone: "danger",
+    });
+
+    if (!confirmed) {
       return;
     }
 
-    const current = sortedCategories[index];
-    const target = sortedCategories[targetIndex];
-
-    await Promise.all([
-      updateCategory(current.id, { order_position: target.order_position }),
-      updateCategory(target.id, { order_position: current.order_position }),
-    ]);
-    await load();
+    try {
+      setError("");
+      await deleteCategoryApi(category.id);
+      await load();
+      notify({
+        title: "Categoría eliminada",
+        message: `${category.nombre} se eliminó correctamente.`,
+        tone: "success",
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo eliminar la categoría.");
+      notify({ title: "No se pudo eliminar la categoría", tone: "error" });
+    }
   }
 
   return (
@@ -89,34 +127,38 @@ export function CategoriesPage() {
       </section>
 
       <section className="list-stack">
-        {sortedCategories.map((category, index) => (
+        {error ? <div className="form-error">{error}</div> : null}
+        {sortedCategories.map((category) => (
           <article className="list-row card category-row" key={category.id}>
             <div className="category-main">
               <span className="category-icon-badge" style={{ backgroundColor: category.color ?? "#5a8f5a" }}>
                 {category.emoji}
               </span>
-              <div>
+              <div className="category-copy">
                 <strong>{category.nombre}</strong>
-                <p>{category.activa ? "Activa" : "Oculta"}</p>
+                <span className={`category-status ${category.activa ? "active" : "hidden"}`}>
+                  {category.activa ? "Activa" : "Oculta"}
+                </span>
               </div>
             </div>
-            <div className="row-actions wrap-actions">
-              <button className="ghost-button small" onClick={() => moveCategory(category, "up")} disabled={index === 0} type="button">
-                Subir
+            <div className="row-actions category-actions">
+              <button
+                className="ghost-button small icon-button"
+                onClick={() => handleToggleCategory(category)}
+                type="button"
+                aria-label={category.activa ? "Ocultar categoría" : "Activar categoría"}
+                title={category.activa ? "Ocultar categoría" : "Activar categoría"}
+              >
+                <span aria-hidden="true">{category.activa ? "👁️" : "🙈"}</span>
               </button>
               <button
-                className="ghost-button small"
-                onClick={() => moveCategory(category, "down")}
-                disabled={index === sortedCategories.length - 1}
+                className="ghost-button small danger icon-button"
+                onClick={() => handleDeleteCategory(category)}
                 type="button"
+                aria-label="Eliminar categoría"
+                title="Eliminar categoría"
               >
-                Bajar
-              </button>
-              <button className="ghost-button small" onClick={() => updateCategory(category.id, { activa: !category.activa }).then(load)} type="button">
-                {category.activa ? "Ocultar" : "Activar"}
-              </button>
-              <button className="ghost-button small danger" onClick={() => deleteCategoryApi(category.id).then(load)} type="button">
-                Eliminar
+                <span aria-hidden="true">🗑️</span>
               </button>
             </div>
           </article>

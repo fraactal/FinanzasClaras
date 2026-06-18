@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { BudgetBanner, CategorySummary, Money } from "../components/ReportCards";
+import { useUI } from "../hooks/useUI";
 import {
   createExpense,
   deleteExpense,
@@ -72,6 +73,7 @@ function monthValueToParts(monthValue: string) {
 }
 
 export function DashboardPage() {
+  const { confirm, notify } = useUI();
   const initialDate = today();
   const [activeTab, setActiveTab] = useState<DashboardTab>("day");
   const [categories, setCategories] = useState<Category[]>([]);
@@ -172,8 +174,10 @@ export function DashboardPage() {
       ]);
       setWeekReferenceDate(form.fecha_gasto);
       setSelectedMonth(toMonthValue(form.fecha_gasto));
+      notify({ title: "Gasto registrado", message: "El gasto se guardó correctamente.", tone: "success" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar el gasto.");
+      notify({ title: "No se pudo guardar el gasto", tone: "error" });
     }
   }
 
@@ -204,18 +208,37 @@ export function DashboardPage() {
       ]);
       setWeekReferenceDate(form.fecha_gasto);
       setSelectedMonth(toMonthValue(form.fecha_gasto));
+      notify({ title: "Gasto rápido registrado", message: "El movimiento se agregó correctamente.", tone: "success" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo registrar el gasto rápido.");
+      notify({ title: "No se pudo registrar el gasto rápido", tone: "error" });
     }
   }
 
   async function removeExpense(id: number) {
-    await deleteExpense(id);
-    await Promise.all([
-      refreshDaily(selectedDate),
-      loadWeekly(weekReferenceDate),
-      loadMonthly(selectedMonth),
-    ]);
+    const confirmed = await confirm({
+      title: "Eliminar gasto",
+      message: "¿Eliminar este gasto?",
+      details: "Esta acción no se puede deshacer.",
+      confirmLabel: "Eliminar",
+      cancelLabel: "Cancelar",
+      tone: "danger",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteExpense(id);
+      await Promise.all([
+        refreshDaily(selectedDate),
+        loadWeekly(weekReferenceDate),
+        loadMonthly(selectedMonth),
+      ]);
+      notify({ title: "Gasto eliminado", message: "El movimiento fue eliminado.", tone: "success" });
+    } catch {
+      notify({ title: "No se pudo eliminar el gasto", tone: "error" });
+    }
   }
 
   const currentBudget =
@@ -237,7 +260,7 @@ export function DashboardPage() {
 
   return (
     <div className="stack-page">
-      {currentBudget && typeof currentTotal === "number" ? <BudgetBanner total={currentTotal} budget={currentBudget} /> : null}
+      {currentBudget && typeof currentTotal === "number" ? <BudgetBanner total={currentTotal} budget={currentBudget} period={activeTab} /> : null}
 
       <section className="card">
         <div className="section-head section-head-start">
@@ -282,15 +305,9 @@ export function DashboardPage() {
                 <h3>Qué pasó ese día</h3>
                 <p className="section-subtitle">{formattedSelectedDate}</p>
               </div>
-              <div className="dashboard-toolbar-controls">
-                <button
-                  className="ghost-button small"
-                  type="button"
-                  onClick={() => setSelectedDate((current) => shiftDate(current, -1))}
-                >
-                  Día anterior
-                </button>
+              <div className="dashboard-toolbar-controls day-toolbar-controls">
                 <input
+                  className="toolbar-date-input"
                   type="date"
                   value={selectedDate}
                   onChange={(e) => {
@@ -299,18 +316,16 @@ export function DashboardPage() {
                     setSelectedMonth(toMonthValue(e.target.value));
                   }}
                 />
-                <button className="ghost-button small" type="button" onClick={() => setSelectedDate(today())}>
-                  Hoy
-                </button>
               </div>
             </div>
 
-            <div className="section-head">
+            <div className="section-head dashboard-quick-head">
               <div>
                 <p className="eyebrow">Registro rápido</p>
                 <h3>Agregar gasto</h3>
               </div>
               <select
+                className="dashboard-category-select"
                 value={form.category_id}
                 onChange={(e) => setForm({ ...form, category_id: e.target.value })}
                 disabled={!categories.length}
@@ -401,12 +416,12 @@ export function DashboardPage() {
                 {expenses.length === 0 ? (
                   <div className="empty-card">Aún no registras gastos para esta fecha.</div>
                 ) : (
-                  <div className="list-stack">
+                  <div className="list-stack daily-expense-list">
                     {expenses.map((expense) => {
                       const category = categories.find((item) => item.id === expense.category_id);
                       return (
-                        <div className="list-row" key={expense.id}>
-                          <div>
+                        <div className="list-row daily-expense-row" key={expense.id}>
+                          <div className="daily-expense-copy">
                             <strong>
                               {category?.emoji} {expense.descripcion}
                             </strong>
@@ -415,12 +430,18 @@ export function DashboardPage() {
                               {new Date(`${expense.fecha_gasto}T12:00:00`).toLocaleDateString("es-CL")}
                             </p>
                           </div>
-                          <div className="row-actions">
-                            <span>
+                          <div className="row-actions daily-expense-actions">
+                            <span className="daily-expense-amount">
                               <Money value={expense.monto} />
                             </span>
-                            <button className="ghost-button small" onClick={() => removeExpense(expense.id)} type="button">
-                              Eliminar
+                            <button
+                              className="ghost-button small danger icon-button daily-expense-delete"
+                              onClick={() => removeExpense(expense.id)}
+                              type="button"
+                              aria-label="Eliminar gasto"
+                              title="Eliminar gasto"
+                            >
+                              <span aria-hidden="true">🗑️</span>
                             </button>
                           </div>
                         </div>
@@ -441,23 +462,27 @@ export function DashboardPage() {
                 <h3>Navega tus semanas registradas</h3>
                 <p className="section-subtitle">{formattedWeekRange}</p>
               </div>
-              <div className="dashboard-toolbar-controls wrap-actions">
+              <div className="dashboard-toolbar-controls wrap-actions weekly-toolbar-controls">
                 <button
-                  className="ghost-button small"
+                  className="ghost-button small weekly-nav-button"
                   type="button"
                   onClick={() => setWeekReferenceDate((current) => shiftDate(current, -7))}
+                  aria-label="Semana anterior"
+                  title="Semana anterior"
                 >
-                  Semana anterior
+                  ←
                 </button>
-                <button className="ghost-button small" type="button" onClick={() => setWeekReferenceDate(today())}>
+                <button className="ghost-button small weekly-current-button" type="button" onClick={() => setWeekReferenceDate(today())}>
                   Semana actual
                 </button>
                 <button
-                  className="ghost-button small"
+                  className="ghost-button small weekly-nav-button"
                   type="button"
                   onClick={() => setWeekReferenceDate((current) => shiftDate(current, 7))}
+                  aria-label="Semana siguiente"
+                  title="Semana siguiente"
                 >
-                  Semana siguiente
+                  →
                 </button>
               </div>
             </div>
@@ -466,7 +491,7 @@ export function DashboardPage() {
               <div className="empty-card">Cargando tu resumen semanal...</div>
             ) : (
               <>
-                <section className="stats-grid">
+                <section className="stats-grid weekly-stats-grid">
                   <article className="stat-card">
                     <p>Total de la semana</p>
                     <strong>
@@ -498,9 +523,9 @@ export function DashboardPage() {
                       <h3>Gasto por día</h3>
                     </div>
                   </div>
-                  <div className="chart-row">
+                  <div className="chart-row weekly-chart-row">
                     {weeklyReport.dias.map((day) => (
-                      <div className="chart-bar-card" key={day.fecha}>
+                      <div className="chart-bar-card weekly-chart-card" key={day.fecha}>
                         <div className="chart-bar-wrap">
                           <div className="chart-bar" style={{ height: `${Math.max((day.total / weeklyMax) * 160, 8)}px` }} />
                         </div>
@@ -535,18 +560,29 @@ export function DashboardPage() {
                 <h3>Cómo se está comportando el mes</h3>
                 <p className="section-subtitle">{formattedMonth}</p>
               </div>
-              <div className="dashboard-toolbar-controls wrap-actions">
+              <div className="dashboard-toolbar-controls wrap-actions monthly-toolbar-controls">
                 <button
-                  className="ghost-button small"
+                  className="ghost-button small monthly-nav-button"
                   type="button"
                   onClick={() => setSelectedMonth((current) => shiftMonth(current, -1))}
+                  aria-label="Mes anterior"
+                  title="Mes anterior"
                 >
-                  Mes anterior
+                  ←
                 </button>
-                <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
-                <button className="ghost-button small" type="button" onClick={() => setSelectedMonth(toMonthValue(today()))}>
+                <button className="ghost-button small monthly-current-button" type="button" onClick={() => setSelectedMonth(toMonthValue(today()))}>
                   Mes actual
                 </button>
+                <button
+                  className="ghost-button small monthly-nav-button"
+                  type="button"
+                  onClick={() => setSelectedMonth((current) => shiftMonth(current, 1))}
+                  aria-label="Mes siguiente"
+                  title="Mes siguiente"
+                >
+                  →
+                </button>
+                <input className="month-picker-input" type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
               </div>
             </div>
 
@@ -554,7 +590,7 @@ export function DashboardPage() {
               <div className="empty-card">Cargando tu resumen mensual...</div>
             ) : (
               <>
-                <section className="stats-grid">
+                <section className="stats-grid monthly-stats-grid">
                   <article className="stat-card">
                     <p>Total del mes</p>
                     <strong>

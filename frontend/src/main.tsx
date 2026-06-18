@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthProvider } from "./hooks/useAuth";
+import { UIProvider } from "./hooks/useUI";
 import { AuthPage } from "./pages/AuthPage";
 import { BackofficePage } from "./pages/BackofficePage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -45,10 +46,12 @@ function AppRoutes() {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <AuthProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
-    </AuthProvider>
+    <UIProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </AuthProvider>
+    </UIProvider>
   </React.StrictMode>,
 );

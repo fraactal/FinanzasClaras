@@ -9,7 +9,7 @@ from app.models.user import User, utc_now
 
 
 DEFAULT_CATEGORIES = [
-    ("Locomoción", "🚌", "#4b6b4b"),
+    ("Transporte", "🚗", "#4b6b4b"),
     ("Alimentación", "🍽️", "#5a8f5a"),
     ("Hidratación / Café / Bebidas", "☕", "#c9a84c"),
     ("Recreación", "🎉", "#7a8f4f"),

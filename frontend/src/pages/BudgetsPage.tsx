@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 
+import { useUI } from "../hooks/useUI";
 import { createBudget, deleteBudget, fetchBudgets, fetchCategories } from "../services/dashboard";
 import type { Budget, Category } from "../types";
 import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
@@ -17,6 +18,7 @@ function formatLocalDate(dateString: string) {
 }
 
 export function BudgetsPage() {
+  const { confirm, notify } = useUI();
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [form, setForm] = useState({
@@ -40,17 +42,47 @@ export function BudgetsPage() {
     event.preventDefault();
     const amount = parseCurrencyInput(form.monto);
     if (!amount || amount <= 0) {
+      notify({ title: "Monto inválido", message: "Ingresa un monto mayor a cero.", tone: "error" });
       return;
     }
-    await createBudget({
-      periodo: form.periodo,
-      monto: amount,
-      fecha_inicio: form.fecha_inicio,
-      category_id: form.category_id ? Number(form.category_id) : null,
-      activo: true,
+
+    try {
+      await createBudget({
+        periodo: form.periodo,
+        monto: amount,
+        fecha_inicio: form.fecha_inicio,
+        category_id: form.category_id ? Number(form.category_id) : null,
+        activo: true,
+      });
+      setForm({ ...form, monto: "", category_id: "" });
+      await load();
+      notify({ title: "Presupuesto guardado", message: "El tope quedó registrado correctamente.", tone: "success" });
+    } catch {
+      notify({ title: "No se pudo guardar el presupuesto", tone: "error" });
+    }
+  }
+
+  async function handleDeleteBudget(budget: Budget) {
+    const confirmed = await confirm({
+      title: "Eliminar presupuesto",
+      message: `¿Eliminar el presupuesto ${budget.periodo}?`,
+      details: "Esta acción no se puede deshacer.",
+      confirmLabel: "Eliminar",
+      cancelLabel: "Cancelar",
+      tone: "danger",
     });
-    setForm({ ...form, monto: "", category_id: "" });
-    await load();
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteBudget(budget.id);
+      await load();
+      notify({ title: "Presupuesto eliminado", message: "El presupuesto ya no está activo.", tone: "success" });
+    } catch {
+      notify({ title: "No se pudo eliminar el presupuesto", tone: "error" });
+    }
   }
 
   return (
@@ -98,7 +130,7 @@ export function BudgetsPage() {
             </div>
             <div className="row-actions">
               <strong>${budget.monto.toLocaleString("es-CL")}</strong>
-              <button className="ghost-button small danger" onClick={() => deleteBudget(budget.id).then(load)} type="button">
+              <button className="ghost-button small danger" onClick={() => handleDeleteBudget(budget)} type="button">
                 Eliminar
               </button>
             </div>
